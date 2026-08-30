@@ -10,7 +10,6 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
-  id-token: write
 
 concurrency:
   group: release-${{ github.ref_name }}
@@ -69,7 +68,6 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
       RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
     steps:
       - name: Checkout release tag
@@ -111,22 +109,7 @@ jobs:
           echo "✅ Version consistency check passed"
 
       - name: Publish to npm with trusted publishing (OIDC)
-        id: publish_with_oidc
-        continue-on-error: true
         run: npm publish
-
-      - name: Publish to npm with token fallback
-        id: publish_with_token
-        if: ${{ steps.publish_with_oidc.outcome == 'failure' && env.NPM_TOKEN != '' }}
-        run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
-
-      - name: Fail if publish did not succeed
-        if: ${{ steps.publish_with_oidc.outcome == 'failure' && steps.publish_with_token.outcome != 'success' }}
-        run: |
-          echo "::error::npm publish failed. Configure trusted publishing (OIDC) or provide a valid granular NPM_TOKEN with write permissions."
-          exit 1
 
       - name: Create package tarball
         run: npm pack

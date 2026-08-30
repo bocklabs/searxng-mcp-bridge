@@ -50,22 +50,22 @@ try {
     console.log('Successfully generated changelog content.');
   } catch (error) {
     console.error('Failed to generate changelog content using conventional-changelog:', error.message);
-    console.error('Make sure conventional-changelog-cli is installed (npm install --save-dev conventional-changelog-cli)');
+    console.error('Make sure conventional-changelog and conventional-changelog-angular are installed');
     // Exit if generation fails
     process.exit(1);
   }
 
   let existingChangelog = fs.readFileSync(changelogPath, 'utf8');
-  
+
   // Find the insertion point after the '## [Unreleased]' header
   const unreleasedHeader = '## [Unreleased]';
   const insertionPointIndex = existingChangelog.indexOf(unreleasedHeader);
-  
+
   if (insertionPointIndex === -1) {
     console.error('Could not find "## [Unreleased]" section header in CHANGELOG.md');
     process.exit(1);
   }
-  
+
   const endOfUnreleasedHeaderLine = existingChangelog.indexOf('\n', insertionPointIndex) + 1;
 
   // Insert the generated content after the '[Unreleased]' header line
@@ -79,11 +79,11 @@ try {
   console.log('Updated CHANGELOG.md with new release section.');
 
   execSync('git add package.json package-lock.json CHANGELOG.md', { cwd: rootDir, stdio: 'inherit' });
-  
+
   execSync(`git commit -m "chore: bump version to ${newVersion}"`, { stdio: 'inherit' });
-  
+
   execSync(`git tag v${newVersion}`, { stdio: 'inherit' });
-  
+
   console.log(`\nVersion ${newVersion} prepared!`);
   console.log('\nNext steps:');
   console.log('1. Review the changes');

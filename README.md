@@ -1,7 +1,7 @@
 # SearXNG MCP Bridge Server
 
-[![Release](https://github.com/nitish-raj/searxng-mcp-bridge/actions/workflows/release.yml/badge.svg)](https://github.com/nitish-raj/searxng-mcp-bridge/actions/workflows/release.yml)
-[![npm version](https://img.shields.io/npm/v/@nitish-raj/searxng-mcp-bridge.svg)](https://www.npmjs.com/package/@nitish-raj/searxng-mcp-bridge)
+[![Release](https://github.com/bocklabs/searxng-mcp-bridge/actions/workflows/release.yml/badge.svg)](https://github.com/bocklabs/searxng-mcp-bridge/actions/workflows/release.yml)
+[![npm version](https://img.shields.io/npm/v/@bocklabs/searxng-mcp-bridge.svg)](https://www.npmjs.com/package/@bocklabs/searxng-mcp-bridge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-25.x-green.svg)](https://nodejs.org/)
 
@@ -24,17 +24,17 @@ docker run -d -p 8080:8080 --name searxng searxng/searxng
 
 **STDIO mode** (default, for MCP clients like Claude Desktop):
 ```bash
-npx -y @nitish-raj/searxng-mcp-bridge
+npx -y @bocklabs/searxng-mcp-bridge
 ```
 
 **HTTP mode** (for web/remote clients):
 ```bash
-TRANSPORT=http PORT=3002 SEARXNG_INSTANCE_URL=http://localhost:8080 npx -y @nitish-raj/searxng-mcp-bridge
+TRANSPORT=http PORT=3002 SEARXNG_INSTANCE_URL=http://localhost:8080 npx -y @bocklabs/searxng-mcp-bridge
 ```
 
 **Via CLI flag** (alternative to env var):
 ```bash
-SEARXNG_INSTANCE_URL=http://localhost:8080 npx -y @nitish-raj/searxng-mcp-bridge --transport=http
+SEARXNG_INSTANCE_URL=http://localhost:8080 npx -y @bocklabs/searxng-mcp-bridge --transport=http
 ```
 
 ### 3. Configure your MCP client
@@ -45,7 +45,7 @@ SEARXNG_INSTANCE_URL=http://localhost:8080 npx -y @nitish-raj/searxng-mcp-bridge
   "mcpServers": {
     "searxng-bridge": {
       "command": "npx",
-      "args": ["-y", "@nitish-raj/searxng-mcp-bridge"],
+      "args": ["-y", "@bocklabs/searxng-mcp-bridge"],
       "env": {
         "SEARXNG_INSTANCE_URL": "http://localhost:8080"
       }
@@ -60,7 +60,7 @@ SEARXNG_INSTANCE_URL=http://localhost:8080 npx -y @nitish-raj/searxng-mcp-bridge
   "mcpServers": {
     "searxng-bridge": {
       "command": "npx",
-      "args": ["-y", "@nitish-raj/searxng-mcp-bridge"],
+      "args": ["-y", "@bocklabs/searxng-mcp-bridge"],
       "env": {
         "SEARXNG_INSTANCE_URL": "http://localhost:8080"
       },
@@ -248,7 +248,7 @@ Releases are automated via [release-please](https://github.com/googleapis/releas
 4. Ensure `npm run build` passes
 5. Open a pull request using the [PR template](.github/PULL_REQUEST_TEMPLATE.md)
 
-Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/nitish-raj/searxng-mcp-bridge/issues).
+Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/bocklabs/searxng-mcp-bridge/issues).
 
 ## License
 

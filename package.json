@@ -1,8 +1,11 @@
 {
-  "name": "@nitish-raj/searxng-mcp-bridge",
+  "name": "@bocklabs/searxng-mcp-bridge",
   "version": "0.11.51",
   "description": "MCP Server for SearxNG Bridge",
   "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "mcp-searxng-bridge": "build/index.js"
@@ -51,12 +54,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nitish-raj/searxng-mcp-bridge.git"
+    "url": "git+https://github.com/bocklabs/searxng-mcp-bridge.git"
   },
   "bugs": {
-    "url": "https://github.com/nitish-raj/searxng-mcp-bridge/issues"
+    "url": "https://github.com/bocklabs/searxng-mcp-bridge/issues"
   },
-  "homepage": "https://github.com/nitish-raj/searxng-mcp-bridge#readme",
+  "homepage": "https://github.com/bocklabs/searxng-mcp-bridge#readme",
   "engines": {
     "node": ">=25.0.0 <26"
   }

@@ -1,6 +1,6 @@
 # SearXNG MCP Bridge Server
 
-[![Release](https://github.com/bocklabs/searxng-mcp-bridge/actions/workflows/release.yml/badge.svg)](https://github.com/bocklabs/searxng-mcp-bridge/actions/workflows/release.yml)
+[![Release](https://github.com/bocklabs/searxng-mcp-bridge/actions/workflows/release.yaml/badge.svg)](https://github.com/bocklabs/searxng-mcp-bridge/actions/workflows/release.yaml)
 [![npm version](https://img.shields.io/npm/v/@bocklabs/searxng-mcp-bridge.svg)](https://www.npmjs.com/package/@bocklabs/searxng-mcp-bridge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-25.x-green.svg)](https://nodejs.org/)

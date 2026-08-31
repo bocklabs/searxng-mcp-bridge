@@ -1,3 +1,11 @@
+## [0.12.1](https://github.com/bocklabs/searxng-mcp-bridge/compare/v0.12.0...v0.12.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* streamline output variable assignment in release workflow ([41af8d8](https://github.com/bocklabs/searxng-mcp-bridge/commit/41af8d8abea1833a4d505e9ece7a760dcc2704fb))
+* update version script and dependencies for changelog generation ([ef44594](https://github.com/bocklabs/searxng-mcp-bridge/commit/ef44594eaef4f871ce871598b1adde2882130f0d))
+* update version script and dependencies for changelog generation ([efd226b](https://github.com/bocklabs/searxng-mcp-bridge/commit/efd226b4c60888ba721be4c6606e1dd9c3c1d59d))
 
 ## 0.11.52 (2026-08-30)
 

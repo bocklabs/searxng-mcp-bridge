@@ -1,0 +1,18 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-yaml
+      - id: check-json
+
+  - repo: local
+    hooks:
+      - id: typescript-build
+        name: TypeScript build
+        entry: npm run build
+        language: system
+        pass_filenames: false
+        files: \.(ts|json)$

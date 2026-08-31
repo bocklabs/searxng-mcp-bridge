@@ -20,11 +20,14 @@ jobs:
     name: Prepare Release
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      pending_release: ${{ steps.release-state.outputs.pending_release }}
+      release_tag: ${{ steps.release-state.outputs.release_tag }}
+      release_version: ${{ steps.release-state.outputs.release_version }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
       - name: Mint app token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -32,56 +35,102 @@ jobs:
           client-id: ${{ secrets.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_KEY }}
 
+      - name: Detect pending release
+        id: release-state
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          PACKAGE_NAME="$(node -p 'require("./package.json").name')"
+          RELEASE_VERSION="$(node -p 'require("./package.json").version')"
+          RELEASE_TAG="v${RELEASE_VERSION}"
+
+          if npm view "${PACKAGE_NAME}@${RELEASE_VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            NPM_PUBLISHED=true
+          else
+            NPM_PUBLISHED=false
+          fi
+
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            GITHUB_RELEASED=true
+          else
+            GITHUB_RELEASED=false
+          fi
+
+          if [[ "${NPM_PUBLISHED}" == "true" && "${GITHUB_RELEASED}" == "true" ]]; then
+            PENDING_RELEASE=false
+          else
+            PENDING_RELEASE=true
+          fi
+
+          {
+            echo "pending_release=${PENDING_RELEASE}"
+            echo "release_tag=${RELEASE_TAG}"
+            echo "release_version=${RELEASE_VERSION}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release state: npm_published=${NPM_PUBLISHED}, github_release=${GITHUB_RELEASED}, tag=${RELEASE_TAG}"
+
       - name: Run release-please
+        if: ${{ steps.release-state.outputs.pending_release != 'true' }}
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-release: true
 
       - name: Enable auto-merge for release PR
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        if: ${{ steps.release-state.outputs.pending_release != 'true' && steps.release.outputs.prs_created == 'true' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
+          set -uo pipefail
           PRS='${{ steps.release.outputs.prs }}'
-
           if [ -z "$PRS" ] || [ "$PRS" = "[]" ]; then
-            echo "No PRs found. Skipping auto-merge."
+            echo "No release PR found; nothing to merge."
             exit 0
           fi
-
           PR_NUMBER=$(echo "$PRS" | jq -r '.[0].number')
-
           if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
             echo "Invalid PR number."
             exit 1
           fi
-
-          echo "Enabling auto-merge for PR #$PR_NUMBER"
-          gh pr merge --auto --squash --repo "$GITHUB_REPOSITORY" "$PR_NUMBER"
+          echo "Auto-merging release PR #$PR_NUMBER"
+          if gh pr merge --auto --squash --repo "$GITHUB_REPOSITORY" "$PR_NUMBER" 2>&1; then
+            echo "Auto-merge enabled / merged for PR #$PR_NUMBER."
+            exit 0
+          fi
+          echo "--auto unavailable; merging directly with retry."
+          for i in $(seq 1 12); do
+            if gh pr merge --squash --repo "$GITHUB_REPOSITORY" "$PR_NUMBER"; then
+              echo "Merged release PR #$PR_NUMBER."
+              exit 0
+            fi
+            echo "attempt $i/12: waiting for mergeability..."
+            sleep 10
+          done
+          echo "::warning::Could not auto-merge release PR #$PR_NUMBER after retries; merge manually."
 
   publish:
     name: Publish Package
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    if: ${{ needs.release-please.outputs.pending_release == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
 
     env:
-      RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
-      RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
+      RELEASE_TAG: ${{ needs.release-please.outputs.release_tag }}
+      RELEASE_VERSION: ${{ needs.release-please.outputs.release_version }}
 
     steps:
-      - name: Checkout release tag
+      - name: Checkout repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ env.RELEASE_TAG }}
 
       - name: Use Node.js
         uses: actions/setup-node@v7
@@ -115,13 +164,40 @@ jobs:
 
           echo "✅ Version consistency check passed"
 
+      - name: Check whether npm version is already published
+        id: npm-version
+        run: |
+          PACKAGE_NAME="$(node -p 'require("./package.json").name')"
+          if npm view "${PACKAGE_NAME}@${RELEASE_VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "${PACKAGE_NAME}@${RELEASE_VERSION} is already published; skipping npm publish."
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish to npm with trusted publishing (OIDC)
+        if: ${{ steps.npm-version.outputs.should_publish == 'true' }}
         run: npm publish
 
-      - name: Create package tarball
-        run: npm pack
+      - name: Mint app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
 
-      - name: Upload package to GitHub release
+      - name: Create GitHub release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${RELEASE_TAG}" ./*.tgz --clobber
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "${RELEASE_TAG} already exists; skipping GitHub release creation."
+            exit 0
+          fi
+
+          gh release create "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "${RELEASE_TAG}" \
+            --generate-notes

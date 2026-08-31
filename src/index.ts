@@ -55,7 +55,7 @@ const redactLog = (message: string, ...args: any[]) => {
       .replace(/(Authorization: Bearer\s+)[^\s]+/gi, '$1[REDACTED]')
       .replace(/(mcp-session-id:\s*)[^\s]+/gi, '$1[REDACTED]')
       .replace(/(SEARXNG_INSTANCE_URL=)[^\s]+/g, '$1[REDACTED]');
-    
+
     console.log(redactedMessage, ...args);
   }
 };
@@ -95,7 +95,7 @@ class SearxngBridgeServer {
         params: { q: 'connection_test', format: 'json' },
         timeout: 10000 // 10s for validation
       });
-      
+
       if (response.status === 200 && response.data) {
         console.log(`[SearxNG Bridge] ✅ Successfully connected to SearXNG instance`);
       } else {
@@ -204,7 +204,7 @@ class SearxngBridgeServer {
       await this.server.close();
       process.exit(0);
     });
-    
+
     setInterval(() => this.cleanCache(), 60 * 1000); // Clean cache every minute
   }
 
@@ -328,7 +328,7 @@ class SearxngBridgeServer {
 
       // All retries failed
       let errorMessage = `Failed to fetch search results from SearxNG instance at ${SEARXNG_URL} after ${this.MAX_RETRIES} attempts.`;
-      
+
       if (axios.isAxiosError(lastError)) {
         if (lastError.code === 'ECONNREFUSED') {
           errorMessage = `Connection refused to SearXNG at ${SEARXNG_URL} - check if the instance is running and accessible`;
@@ -374,7 +374,7 @@ class SearxngBridgeServer {
        const PORT = parseInt(process.env.PORT || '3002', 10);
        const HOST = process.env.HOST || '127.0.0.1';
        app.use(express.json());
-      
+
       // Add a logging middleware to inspect headers
       app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
         redactLog(`[SearxNG Bridge] Incoming request: ${req.method} ${req.path}`);
@@ -386,11 +386,11 @@ class SearxngBridgeServer {
       const bearerAuthMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
         const requiredPaths = ['/mcp', '/healthz'];
         const isProtectedPath = requiredPaths.some(path => req.path === path || req.path.startsWith(path));
-        
+
         // Only apply to POST, GET, DELETE requests on protected paths
         if (isProtectedPath && ['POST', 'GET', 'DELETE'].includes(req.method)) {
           const bearerToken = process.env.MCP_HTTP_BEARER;
-          
+
           // If bearer auth is enabled, check for valid Authorization header
           if (bearerToken) {
             const authHeader = req.headers.authorization;
@@ -398,7 +398,7 @@ class SearxngBridgeServer {
               redactLog('[SearxNG Bridge] Unauthorized access attempt - missing or invalid Authorization header');
               return res.status(401).json({ error: 'Unauthorized: Missing or invalid Authorization header' });
             }
-            
+
             const token = authHeader.substring(7); // Remove 'Bearer ' prefix
             if (token !== bearerToken) {
               redactLog('[SearxNG Bridge] Unauthorized access attempt - invalid token');
@@ -408,19 +408,19 @@ class SearxngBridgeServer {
         }
         next();
       };
-      
+
       // Apply the bearer auth middleware
       app.use(bearerAuthMiddleware);
-      
+
         // Secure CORS configuration with whitelist approach
-        const corsOrigin = process.env.CORS_ORIGIN 
-          ? (process.env.CORS_ORIGIN.includes(',') 
-              ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()) 
+        const corsOrigin = process.env.CORS_ORIGIN
+          ? (process.env.CORS_ORIGIN.includes(',')
+              ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
               : process.env.CORS_ORIGIN)
-          : process.env.NODE_ENV === 'production' 
+          : process.env.NODE_ENV === 'production'
             ? '*' // Production wildcard
             : ['http://localhost:3002', 'http://127.0.0.1:3002']; // Development whitelist - only port 3002
-        
+
         // CORS validation function
         const validateOrigin = (origin: string | undefined, allowedOrigins: string | string[]): boolean => {
           if (!origin) return true; // Allow requests with no origin (curl, mobile apps)
@@ -430,7 +430,7 @@ class SearxngBridgeServer {
           }
           return allowedOrigins === origin;
         };
-        
+
         app.use(cors({
          origin: (origin, callback) => {
            // For credentialed requests, we cannot use wildcard
@@ -439,7 +439,7 @@ class SearxngBridgeServer {
              // No origin header (curl, mobile apps) - allow but don't use credentials
              return callback(null, false);
            }
-           
+
            if (validateOrigin(origin, corsOrigin)) {
              // Return the specific origin for credentialed requests
              callback(null, origin);
@@ -512,7 +512,7 @@ class SearxngBridgeServer {
       // OPTIONS endpoint for CORS preflight requests with security
       app.options('/mcp', (req: express.Request, res: express.Response) => {
         const origin = req.headers.origin;
-        
+
         // Validate origin for preflight requests
         if (!origin) {
           // No origin header - allow without credentials
@@ -523,7 +523,7 @@ class SearxngBridgeServer {
           res.status(200).send();
           return;
         }
-        
+
         if (validateOrigin(origin, corsOrigin)) {
           // For credentialed requests, must reflect specific origin
           res.header('Access-Control-Allow-Origin', origin);
@@ -543,7 +543,7 @@ class SearxngBridgeServer {
         res.status(200).json({ status: 'ok', version: PACKAGE_VERSION });
       });
        app.delete('/mcp', handleSessionRequest);
- 
+
        const server = app.listen(PORT, HOST, () => {
         console.error(`SearxNG Bridge MCP server v${PACKAGE_VERSION} running on http://${HOST}:${PORT}`);
         if (DEBUG_MODE) console.error('[SearxNG Bridge] Debug mode enabled');

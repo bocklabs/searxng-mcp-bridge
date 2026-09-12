@@ -10,7 +10,7 @@ import { rateLimit } from 'express-rate-limit';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as z from 'zod/v4';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,7 +19,7 @@ const packageJsonPath = path.resolve(__dirname, '../package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version: string };
 const PACKAGE_VERSION = packageJson.version;
 
-const SearchToolSchema = z.object({
+export const SearchToolSchema = z.object({
   query: z.string().describe('The search query string'),
   language: z.string().optional().describe('Language code for search results (e.g., "en-US", "fr", "de")'),
   categories: z.array(z.string()).optional().describe('Categories to search in (e.g., ["general", "images", "news"])'),
@@ -47,7 +47,7 @@ const configuredSearxngUrl = process.env.SEARXNG_INSTANCE_URL;
 const DEBUG_MODE = process.env.SEARXNG_BRIDGE_DEBUG === 'true';
 
 // Logging utility for redacting sensitive information
-const redactLog = (message: string, ...args: unknown[]) => {
+export const redactLog = (message: string, ...args: unknown[]) => {
   if (!DEBUG_MODE) return;
 
   const redactedMessage = message
@@ -59,7 +59,7 @@ const redactLog = (message: string, ...args: unknown[]) => {
 };
 
 // Redact sensitive credentials embedded in instance URLs
-const redactUrl = (url: string | undefined) => {
+export const redactUrl = (url: string | undefined) => {
   if (url) {
     return url.replace(/(https?:\/\/)[^/@]*@/, '$1[REDACTED]@');
   }
@@ -74,19 +74,26 @@ if (!configuredSearxngUrl) {
 const SEARXNG_URL: string = configuredSearxngUrl;
 console.log(`[SearxNG Bridge] Using SearxNG instance URL: ${redactUrl(SEARXNG_URL)}`);
 
-class SearxngBridgeServer {
+export interface SearxngBridgeServerOptions {
+  axiosInstance?: AxiosInstance;
+  packageVersion?: string;
+}
+
+export class SearxngBridgeServer {
   private readonly server: McpServer;
   private readonly axiosInstance: AxiosInstance;
   private readonly cache: Map<string, CacheEntry> = new Map();
   private readonly CACHE_TTL = 5 * 60 * 1000;
   private readonly MAX_RETRIES = 3;
   private readonly RETRY_DELAY = 1000;
+  private readonly packageVersion: string;
 
-  constructor() {
+  constructor(options: SearxngBridgeServerOptions = {}) {
+    this.packageVersion = options.packageVersion ?? PACKAGE_VERSION;
     this.server = new McpServer(
       {
         name: 'searxng-bridge',
-        version: PACKAGE_VERSION,
+        version: options.packageVersion ?? PACKAGE_VERSION,
       },
       {
         capabilities: {
@@ -96,7 +103,7 @@ class SearxngBridgeServer {
       }
     );
 
-    this.axiosInstance = axios.create({
+    this.axiosInstance = options.axiosInstance ?? axios.create({
       baseURL: SEARXNG_URL,
       timeout: 30000, // 30s timeout for slower instances
       headers: {
@@ -173,7 +180,7 @@ class SearxngBridgeServer {
       response_time_ms: responseTime,
       cache_size: this.cache.size,
       debug_mode: DEBUG_MODE,
-      version: PACKAGE_VERSION,
+      version: this.packageVersion,
       timestamp: new Date().toISOString()
     };
 
@@ -331,30 +338,29 @@ class SearxngBridgeServer {
     return `SearXNG request error (${SEARXNG_URL}): ${error.message}`;
   }
 
-  private getTransportMode(): string {
-    const args = process.argv.slice(2);
-    const inlineTransport = args.find((argument) => argument.startsWith('--transport='));
+  private getTransportMode(argv: string[] = process.argv.slice(2), env: NodeJS.ProcessEnv = process.env): string {
+    const inlineTransport = argv.find((argument) => argument.startsWith('--transport='));
 
     if (inlineTransport) {
       return inlineTransport.split('=')[1] || 'stdio';
     }
 
-    const transportFlagIndex = args.indexOf('--transport');
-    if (transportFlagIndex !== -1 && transportFlagIndex + 1 < args.length) {
-      return args[transportFlagIndex + 1];
+    const transportFlagIndex = argv.indexOf('--transport');
+    if (transportFlagIndex !== -1 && transportFlagIndex + 1 < argv.length) {
+      return argv[transportFlagIndex + 1];
     }
 
-    if (process.env.TRANSPORT) {
-      return process.env.TRANSPORT;
+    if (env.TRANSPORT) {
+      return env.TRANSPORT;
     }
 
     return 'stdio';
   }
 
-  async run(): Promise<void> {
+  async run(argv: string[] = process.argv.slice(2)): Promise<void> {
     this.setupProcessHandlers();
     await this.validateSearxngConnection();
-    const transport = this.getTransportMode();
+    const transport = this.getTransportMode(argv);
 
     if (transport === 'http') {
       this.startHttpServer();
@@ -367,7 +373,7 @@ class SearxngBridgeServer {
   private async runStdioServer(): Promise<void> {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error(`SearxNG Bridge MCP server v${PACKAGE_VERSION} running on stdio`);
+    console.error(`SearxNG Bridge MCP server v${this.packageVersion} running on stdio`);
 
     if (DEBUG_MODE) {
       console.error('[SearxNG Bridge] Debug mode enabled');
@@ -380,10 +386,25 @@ class SearxngBridgeServer {
   }
 
   private startHttpServer(): void {
-    const app: Express = express();
-    const transports = new Map<string, StreamableHTTPServerTransport>();
-    const port = Number.parseInt(process.env.PORT || '3002', 10);
     const host = process.env.HOST || '127.0.0.1';
+    const port = Number.parseInt(process.env.PORT || '3002', 10);
+    const transports = new Map<string, StreamableHTTPServerTransport>();
+    const app = this.createHttpApp(transports, host, port);
+    const httpServer = app.listen(port, host, () => {
+      console.error(`SearxNG Bridge MCP server v${this.packageVersion} running on http://${host}:${port}`);
+      if (DEBUG_MODE) console.error('[SearxNG Bridge] Debug mode enabled');
+      if (process.env.MCP_HTTP_BEARER) console.error('[SearxNG Bridge] Bearer authentication enabled');
+    });
+
+    this.registerHttpShutdown(httpServer, transports);
+  }
+
+  private createHttpApp(
+    transports: Map<string, StreamableHTTPServerTransport> = new Map(),
+    host = process.env.HOST || '127.0.0.1',
+    port = Number.parseInt(process.env.PORT || '3002', 10)
+  ): Express {
+    const app: Express = express();
     const corsOrigin = this.getCorsOrigin();
 
     app.disable('x-powered-by');
@@ -397,16 +418,10 @@ class SearxngBridgeServer {
     app.get('/mcp', this.createSessionRequestHandler(transports));
     app.delete('/mcp', this.createSessionRequestHandler(transports));
     app.get('/healthz', (_req: Request, res: Response) => {
-      res.status(200).json({ status: 'ok', version: PACKAGE_VERSION });
+      res.status(200).json({ status: 'ok', version: this.packageVersion });
     });
 
-    const httpServer = app.listen(port, host, () => {
-      console.error(`SearxNG Bridge MCP server v${PACKAGE_VERSION} running on http://${host}:${port}`);
-      if (DEBUG_MODE) console.error('[SearxNG Bridge] Debug mode enabled');
-      if (process.env.MCP_HTTP_BEARER) console.error('[SearxNG Bridge] Bearer authentication enabled');
-    });
-
-    this.registerHttpShutdown(httpServer, transports);
+    return app;
   }
 
   private createHttpLoggingMiddleware() {
@@ -598,10 +613,15 @@ class SearxngBridgeServer {
   }
 }
 
-try {
-  const server = new SearxngBridgeServer();
-  await server.run();
-} catch (error) {
-  console.error('[SearxNG Bridge] Fatal error:', error);
-  process.exit(1);
+const entryArgument = process.argv[1];
+const isDirectExecution = Boolean(entryArgument) && import.meta.url === pathToFileURL(entryArgument).href;
+
+if (isDirectExecution) {
+  try {
+    const server = new SearxngBridgeServer();
+    await server.run();
+  } catch (error) {
+    console.error('[SearxNG Bridge] Fatal error:', error);
+    process.exit(1);
+  }
 }

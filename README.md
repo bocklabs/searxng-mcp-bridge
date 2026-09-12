@@ -225,6 +225,8 @@ docker run -d -p 8081:8081 \
 npm install          # Install dependencies
 npm run dev          # Run with tsx (TypeScript execution, no build step)
 npm run build        # Compile TypeScript to JavaScript
+npm test             # Run tests
+npm run test:coverage # Run tests and generate LCOV coverage
 npm run watch        # Watch for changes and rebuild automatically
 npm run start        # Run the compiled server (stdio mode)
 npm run start:http   # Run the compiled server (HTTP mode on port 3002)
@@ -245,11 +247,7 @@ Releases are automated via [release-please](https://github.com/googleapis/releas
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feat/your-feature`
 3. Make your changes following existing code style
-4. Ensure `npm run build` passes
+4. Ensure `npm run test:coverage` and `npm run build` pass
 5. Open a pull request using the [PR template](.github/PULL_REQUEST_TEMPLATE.md)
 
 Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/bocklabs/searxng-mcp-bridge/issues).
-
-## License
-
-[MIT](LICENSE) -- Copyright (c) 2025 Nitish Raj

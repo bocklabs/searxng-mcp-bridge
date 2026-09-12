@@ -614,7 +614,8 @@ export class SearxngBridgeServer {
 }
 
 const entryArgument = process.argv[1];
-const isDirectExecution = Boolean(entryArgument) && import.meta.url === pathToFileURL(entryArgument).href;
+const entryPath = entryArgument ? fs.realpathSync(entryArgument) : undefined;
+const isDirectExecution = entryPath !== undefined && import.meta.url === pathToFileURL(entryPath).href;
 
 if (isDirectExecution) {
   try {

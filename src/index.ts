@@ -55,7 +55,7 @@ export const redactLog = (message: string, ...args: unknown[]) => {
     .replace(/(mcp-session-id:\s*)[^\s]+/gi, '$1[REDACTED]')
     .replace(/(SEARXNG_INSTANCE_URL=)[^\s]+/g, '$1[REDACTED]');
 
-  console.log(redactedMessage, ...args);
+  console.error(redactedMessage, ...args);
 };
 
 // Redact sensitive credentials embedded in instance URLs
@@ -72,7 +72,7 @@ if (!configuredSearxngUrl) {
 }
 
 const SEARXNG_URL: string = configuredSearxngUrl;
-console.log(`[SearxNG Bridge] Using SearxNG instance URL: ${redactUrl(SEARXNG_URL)}`);
+console.error(`[SearxNG Bridge] Using SearxNG instance URL: ${redactUrl(SEARXNG_URL)}`);
 
 export interface SearxngBridgeServerOptions {
   axiosInstance?: AxiosInstance;
@@ -116,7 +116,7 @@ export class SearxngBridgeServer {
   }
 
   private async validateSearxngConnection(): Promise<void> {
-    console.log(`[SearxNG Bridge] Validating connection to ${SEARXNG_URL}...`);
+    console.error(`[SearxNG Bridge] Validating connection to ${SEARXNG_URL}...`);
 
     try {
       const response = await this.axiosInstance.get<SearxngResponse>('/search', {
@@ -125,7 +125,7 @@ export class SearxngBridgeServer {
       });
 
       if (response.status === 200 && response.data) {
-        console.log('[SearxNG Bridge] ✅ Successfully connected to SearXNG instance');
+        console.error('[SearxNG Bridge] ✅ Successfully connected to SearXNG instance');
       } else {
         console.warn(`[SearxNG Bridge] ⚠️  SearXNG returned status: ${response.status}`);
       }

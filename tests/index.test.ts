@@ -75,7 +75,7 @@ const axiosError = (code?: string, status?: number, statusText = 'Error') =>
 
 describe('SearXNG bridge configuration helpers', () => {
   it('redacts credentials and bearer tokens', () => {
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const logSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     bridge.redactLog('Authorization: Bearer secret mcp-session-id: session SEARXNG_INSTANCE_URL=top-secret');
     expect(logSpy).toHaveBeenCalledWith(
@@ -212,7 +212,7 @@ describe('MCP tools', () => {
 
   it('logs validation failures for axios and unknown errors', async () => {
     const logSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const successSpy = vi.spyOn(console, 'log');
+    const successSpy = vi.spyOn(console, 'error');
     const success = makeServer();
     success.get.mockResolvedValue({ status: 200, data: {} });
     await success.server.validateSearxngConnection();

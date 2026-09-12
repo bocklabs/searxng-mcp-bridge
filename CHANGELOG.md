@@ -7,6 +7,25 @@
 * update version script and dependencies for changelog generation ([ef44594](https://github.com/bocklabs/searxng-mcp-bridge/commit/ef44594eaef4f871ce871598b1adde2882130f0d))
 * update version script and dependencies for changelog generation ([efd226b](https://github.com/bocklabs/searxng-mcp-bridge/commit/efd226b4c60888ba721be4c6606e1dd9c3c1d59d))
 
+## [0.12.3](https://github.com/bocklabs/searxng-mcp-bridge/compare/v0.12.2...v0.12.3) (2026-09-12)
+
+
+### Bug Fixes
+
+* **deps:** lock file maintenance ([#17](https://github.com/bocklabs/searxng-mcp-bridge/issues/17)) ([3e1f9ec](https://github.com/bocklabs/searxng-mcp-bridge/commit/3e1f9ec2edca29b794de9cba237e33c6b5127d3e))
+* **mcp:** keep stdio logs off protocol stream ([#16](https://github.com/bocklabs/searxng-mcp-bridge/issues/16)) ([6caad87](https://github.com/bocklabs/searxng-mcp-bridge/commit/6caad8799150b8cd413b3cc9b5040433ffe7674e))
+
+
+### Continuous Integration
+
+* **release:** let release-please create releases ([#18](https://github.com/bocklabs/searxng-mcp-bridge/issues/18)) ([d4e6588](https://github.com/bocklabs/searxng-mcp-bridge/commit/d4e6588cea3246171770700d4f6493314f6abe3e))
+* **test:** run npm test with coverage ([#15](https://github.com/bocklabs/searxng-mcp-bridge/issues/15)) ([a9b22c6](https://github.com/bocklabs/searxng-mcp-bridge/commit/a9b22c6518ae01d26bea094d7a848641bdffb183))
+
+
+### Miscellaneous Chores
+
+* **deps:** update all major dependencies ([#12](https://github.com/bocklabs/searxng-mcp-bridge/issues/12)) ([766a450](https://github.com/bocklabs/searxng-mcp-bridge/commit/766a4506da623a9f2f60b8a3cf6c78878bfd7bc2))
+
 ## [0.12.2](https://github.com/bocklabs/searxng-mcp-bridge/compare/v0.12.1...v0.12.2) (2026-09-12)
 
 

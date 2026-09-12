@@ -7,6 +7,20 @@
 * update version script and dependencies for changelog generation ([ef44594](https://github.com/bocklabs/searxng-mcp-bridge/commit/ef44594eaef4f871ce871598b1adde2882130f0d))
 * update version script and dependencies for changelog generation ([efd226b](https://github.com/bocklabs/searxng-mcp-bridge/commit/efd226b4c60888ba721be4c6606e1dd9c3c1d59d))
 
+## [0.12.2](https://github.com/bocklabs/searxng-mcp-bridge/compare/v0.12.1...v0.12.2) (2026-09-12)
+
+
+### Bug Fixes
+
+* **deps:** bump the npm_and_yarn group across 1 directory with 2 updates ([#9](https://github.com/bocklabs/searxng-mcp-bridge/issues/9)) ([414755e](https://github.com/bocklabs/searxng-mcp-bridge/commit/414755e5ae9a9ff0baecb579b496c5e6c2484efa))
+
+
+### Miscellaneous Chores
+
+* **deps:** update all non-major dependencies ([#11](https://github.com/bocklabs/searxng-mcp-bridge/issues/11)) ([c7ac367](https://github.com/bocklabs/searxng-mcp-bridge/commit/c7ac36720282da9c14f53b979962a18a605f0984))
+* update readme ([e2dd942](https://github.com/bocklabs/searxng-mcp-bridge/commit/e2dd942d443c2f53c2c984efaf5b1507e5acc7f5))
+* update readme ([acaa46a](https://github.com/bocklabs/searxng-mcp-bridge/commit/acaa46a66caa34e89cc69d75d8e70119584d0526))
+
 ## 0.11.52 (2026-08-30)
 
 

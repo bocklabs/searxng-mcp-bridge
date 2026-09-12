@@ -4,23 +4,25 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
   CallToolRequestSchema,
+  CallToolResult,
   ErrorCode,
+  isInitializeRequest,
   ListToolsRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import axios, { AxiosInstance } from 'axios';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import express from 'express';
+import express, { Express, NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import { rateLimit } from 'express-rate-limit';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const packageJsonPath = path.resolve(__dirname, '../package.json');
-const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version: string };
 const PACKAGE_VERSION = packageJson.version;
 
 interface SearchArgs {
@@ -33,8 +35,24 @@ interface SearchArgs {
   max_results?: number;
 }
 
-const isValidSearchArgs = (args: any): args is SearchArgs => {
-  if (typeof args !== 'object' || args === null || typeof args.query !== 'string') return false;
+interface SearxngResponse {
+  results?: unknown[];
+  [key: string]: unknown;
+}
+
+interface CacheEntry {
+  timestamp: number;
+  data: SearxngResponse;
+}
+
+type McpToolResult = CallToolResult;
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null;
+};
+
+const isValidSearchArgs = (args: unknown): args is SearchArgs => {
+  if (!isRecord(args) || typeof args.query !== 'string') return false;
   if (args.language !== undefined && typeof args.language !== 'string') return false;
   if (args.categories !== undefined && !Array.isArray(args.categories)) return false;
   if (args.time_range !== undefined && typeof args.time_range !== 'string') return false;
@@ -44,127 +62,46 @@ const isValidSearchArgs = (args: any): args is SearchArgs => {
   return true;
 };
 
-const SEARXNG_URL = process.env.SEARXNG_INSTANCE_URL;
+const configuredSearxngUrl = process.env.SEARXNG_INSTANCE_URL;
 const DEBUG_MODE = process.env.SEARXNG_BRIDGE_DEBUG === 'true';
 
 // Logging utility for redacting sensitive information
-const redactLog = (message: string, ...args: any[]) => {
-  if (DEBUG_MODE) {
-    // Redact sensitive information from logs
-    const redactedMessage = message
-      .replace(/(Authorization: Bearer\s+)[^\s]+/gi, '$1[REDACTED]')
-      .replace(/(mcp-session-id:\s*)[^\s]+/gi, '$1[REDACTED]')
-      .replace(/(SEARXNG_INSTANCE_URL=)[^\s]+/g, '$1[REDACTED]');
-    
-    console.log(redactedMessage, ...args);
-  }
+const redactLog = (message: string, ...args: unknown[]) => {
+  if (!DEBUG_MODE) return;
+
+  const redactedMessage = message
+    .replace(/(Authorization: Bearer\s+)[^\s]+/gi, '$1[REDACTED]')
+    .replace(/(mcp-session-id:\s*)[^\s]+/gi, '$1[REDACTED]')
+    .replace(/(SEARXNG_INSTANCE_URL=)[^\s]+/g, '$1[REDACTED]');
+
+  console.log(redactedMessage, ...args);
 };
 
-// Redact sensitive environment variables from logs
+// Redact sensitive credentials embedded in instance URLs
 const redactUrl = (url: string | undefined) => {
-  if (url && typeof url === 'string') {
-    return url.replace(/(https?:\/\/)[^\/@]*@/, '$1[REDACTED]@');
+  if (url) {
+    return url.replace(/(https?:\/\/)[^/@]*@/, '$1[REDACTED]@');
   }
   return url || '';
 };
 
-if (!SEARXNG_URL) {
+if (!configuredSearxngUrl) {
   console.error('[SearxNG Bridge] ERROR: SEARXNG_INSTANCE_URL environment variable is not set.');
   process.exit(1);
-} else {
-  console.log(`[SearxNG Bridge] Using SearxNG instance URL: ${redactUrl(SEARXNG_URL)}`);
 }
 
-interface CacheEntry {
-  timestamp: number;
-  data: any;
-}
+const SEARXNG_URL: string = configuredSearxngUrl;
+console.log(`[SearxNG Bridge] Using SearxNG instance URL: ${redactUrl(SEARXNG_URL)}`);
 
 class SearxngBridgeServer {
-  private server: Server;
-  private axiosInstance: AxiosInstance;
-  private cache: Map<string, CacheEntry> = new Map();
+  private readonly server: Server;
+  private readonly axiosInstance: AxiosInstance;
+  private readonly cache: Map<string, CacheEntry> = new Map();
   private readonly CACHE_TTL = 5 * 60 * 1000;
   private readonly MAX_RETRIES = 3;
   private readonly RETRY_DELAY = 1000;
 
-  private async validateSearxngConnection(): Promise<void> {
-    try {
-      console.log(`[SearxNG Bridge] Validating connection to ${SEARXNG_URL}...`);
-      const response = await this.axiosInstance.get('/search', {
-        params: { q: 'connection_test', format: 'json' },
-        timeout: 10000 // 10s for validation
-      });
-      
-      if (response.status === 200 && response.data) {
-        console.log(`[SearxNG Bridge] ✅ Successfully connected to SearXNG instance`);
-      } else {
-        console.warn(`[SearxNG Bridge] ⚠️  SearXNG returned status: ${response.status}`);
-      }
-    } catch (error) {
-      console.error(`[SearxNG Bridge] ❌ Failed to connect to SearXNG instance at ${SEARXNG_URL}`);
-      if (axios.isAxiosError(error)) {
-        if (error.code === 'ECONNREFUSED') {
-          console.error(`[SearxNG Bridge] Connection refused - check if SearXNG is running at ${SEARXNG_URL}`);
-        } else if (error.code === 'ETIMEDOUT') {
-          console.error(`[SearxNG Bridge] Connection timeout - SearXNG may be slow or unreachable`);
-        } else if (error.response?.status === 404) {
-          console.error(`[SearxNG Bridge] Search endpoint not found - verify SearXNG configuration`);
-        } else {
-          console.error(`[SearxNG Bridge] HTTP Error: ${error.response?.status || error.message}`);
-        }
-      } else {
-        console.error(`[SearxNG Bridge] Network error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      }
-      console.error(`[SearxNG Bridge] Server will continue running but searches may fail`);
-    }
-  }
-
-  private async performHealthCheck() {
-    const startTime = Date.now();
-    let searxngStatus = 'unknown';
-    let responseTime = 0;
-
-    try {
-      const response = await this.axiosInstance.get('/search', {
-        params: { q: 'health_check', format: 'json' },
-        timeout: 5000
-      });
-      responseTime = Date.now() - startTime;
-      searxngStatus = response.status === 200 ? 'healthy' : 'unhealthy';
-    } catch (error) {
-      responseTime = Date.now() - startTime;
-      searxngStatus = 'error';
-    }
-
-    const healthStatus = {
-      status: searxngStatus === 'healthy' ? 'healthy' : 'degraded',
-      searxng_instance: SEARXNG_URL,
-      searxng_status: searxngStatus,
-      response_time_ms: responseTime,
-      cache_size: this.cache.size,
-      debug_mode: DEBUG_MODE,
-      version: PACKAGE_VERSION,
-      timestamp: new Date().toISOString()
-    };
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(healthStatus, null, 2),
-        },
-      ],
-      isError: searxngStatus !== 'healthy',
-    };
-  }
-
   constructor() {
-    // Handle unhandled promise rejections to prevent unexpected connection closures
-    process.on('unhandledRejection', (reason, promise) => {
-      console.error('[Unhandled Rejection] at:', promise, 'reason:', reason);
-    });
-
     this.server = new Server(
       {
         name: 'searxng-bridge',
@@ -187,35 +124,111 @@ class SearxngBridgeServer {
       }
     });
 
-    // Validate SearXNG connection on startup
-    this.validateSearxngConnection();
-
     this.setupToolHandlers();
-
-    this.server.onerror = (error) => {
-      if (error instanceof McpError && error.code === ErrorCode.ConnectionClosed) {
-        console.error('[MCP Connection] Client connection closed unexpectedly');
-      } else {
-        console.error('[MCP Error]', error);
-      }
-    };
-
-    process.on('SIGINT', async () => {
-      await this.server.close();
-      process.exit(0);
-    });
-    
-    setInterval(() => this.cleanCache(), 60 * 1000); // Clean cache every minute
   }
 
-  private cleanCache() {
-    const now = Date.now();
-    for (const [key, entry] of this.cache.entries()) {
-      if (now - entry.timestamp > this.CACHE_TTL) this.cache.delete(key);
+  private async validateSearxngConnection(): Promise<void> {
+    console.log(`[SearxNG Bridge] Validating connection to ${SEARXNG_URL}...`);
+
+    try {
+      const response = await this.axiosInstance.get<SearxngResponse>('/search', {
+        params: { q: 'connection_test', format: 'json' },
+        timeout: 10000 // 10s for validation
+      });
+
+      if (response.status === 200 && response.data) {
+        console.log('[SearxNG Bridge] ✅ Successfully connected to SearXNG instance');
+      } else {
+        console.warn(`[SearxNG Bridge] ⚠️  SearXNG returned status: ${response.status}`);
+      }
+    } catch (error) {
+      console.error(`[SearxNG Bridge] ❌ Failed to connect to SearXNG instance at ${SEARXNG_URL}`);
+      this.logConnectionFailure(error);
+      console.error('[SearxNG Bridge] Server will continue running but searches may fail');
     }
   }
 
-  private setupToolHandlers() {
+  private logConnectionFailure(error: unknown): void {
+    if (!axios.isAxiosError(error)) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[SearxNG Bridge] Network error: ${message}`);
+      return;
+    }
+
+    const status = error.response?.status;
+    if (error.code === 'ECONNREFUSED') {
+      console.error(`[SearxNG Bridge] Connection refused - check if SearXNG is running at ${SEARXNG_URL}`);
+    } else if (error.code === 'ETIMEDOUT') {
+      console.error('[SearxNG Bridge] Connection timeout - SearXNG may be slow or unreachable');
+    } else if (status === 404) {
+      console.error('[SearxNG Bridge] Search endpoint not found - verify SearXNG configuration');
+    } else {
+      console.error(`[SearxNG Bridge] HTTP Error: ${status || error.message}`);
+    }
+  }
+
+  private async performHealthCheck(): Promise<McpToolResult> {
+    const startTime = Date.now();
+    let searxngStatus = 'unknown';
+    let responseTime = 0;
+
+    try {
+      const response = await this.axiosInstance.get<SearxngResponse>('/search', {
+        params: { q: 'health_check', format: 'json' },
+        timeout: 5000
+      });
+      responseTime = Date.now() - startTime;
+      searxngStatus = response.status === 200 ? 'healthy' : 'unhealthy';
+    } catch (error) {
+      responseTime = Date.now() - startTime;
+      searxngStatus = 'error';
+      this.logHealthCheckFailure(error);
+    }
+
+    const healthStatus = {
+      status: searxngStatus === 'healthy' ? 'healthy' : 'degraded',
+      searxng_instance: SEARXNG_URL,
+      searxng_status: searxngStatus,
+      response_time_ms: responseTime,
+      cache_size: this.cache.size,
+      debug_mode: DEBUG_MODE,
+      version: PACKAGE_VERSION,
+      timestamp: new Date().toISOString()
+    };
+
+    return {
+      content: [{ type: 'text', text: JSON.stringify(healthStatus, null, 2) }],
+      isError: searxngStatus !== 'healthy' ? true : undefined,
+    };
+  }
+
+  private logHealthCheckFailure(error: unknown): void {
+    if (axios.isAxiosError(error)) {
+      console.error(`[SearxNG Bridge] Health check failed: ${error.code || error.message}`);
+      return;
+    }
+    console.error('[SearxNG Bridge] Health check failed:', error);
+  }
+
+  private cleanCache(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.cache.entries()) {
+      if (now - entry.timestamp > this.CACHE_TTL) {
+        this.cache.delete(key);
+      }
+    }
+  }
+
+  private setupProcessHandlers(): void {
+    process.on('unhandledRejection', (reason, promise) => {
+      console.error('[Unhandled Rejection] at:', promise, 'reason:', reason);
+    });
+
+    const interval = setInterval(() => this.cleanCache(), 60 * 1000);
+    interval.unref();
+  }
+
+  private setupToolHandlers(): void {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
@@ -287,302 +300,383 @@ class SearxngBridgeServer {
         throw new McpError(ErrorCode.InvalidParams, 'Invalid search arguments. Requires a "query" string.');
       }
 
-      const args = request.params.arguments;
-      const searchParams: Record<string, any> = { q: args.query, format: args.format || 'json' };
-      if (args.language) searchParams.language = args.language;
-      if (args.categories) searchParams.categories = args.categories.join(',');
-      if (args.time_range) searchParams.time_range = args.time_range;
-      if (args.safesearch !== undefined) searchParams.safesearch = args.safesearch;
-
-      const cacheKey = `search:${JSON.stringify(searchParams)}`;
-      const cachedResult = this.cache.get(cacheKey);
-
-      if (cachedResult && Date.now() - cachedResult.timestamp < this.CACHE_TTL) {
-        let results = cachedResult.data;
-        if (args.max_results && results.results) {
-          results = { ...results, results: results.results.slice(0, args.max_results) };
-        }
-        return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
-      }
-
-      // Perform the search with retry logic
-      let lastError: unknown;
-      for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
-        try {
-          const response = await this.axiosInstance.get('/search', { params: searchParams });
-          let results = response.data;
-          if (args.max_results && results.results) {
-            results = { ...results, results: results.results.slice(0, args.max_results) };
-          }
-          if (cacheKey) {
-            this.cache.set(cacheKey, { timestamp: Date.now(), data: response.data });
-          }
-          return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
-        } catch (error) {
-          lastError = error;
-          if (attempt < this.MAX_RETRIES) {
-            await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY * attempt));
-          }
-        }
-      }
-
-      // All retries failed
-      let errorMessage = `Failed to fetch search results from SearxNG instance at ${SEARXNG_URL} after ${this.MAX_RETRIES} attempts.`;
-      
-      if (axios.isAxiosError(lastError)) {
-        if (lastError.code === 'ECONNREFUSED') {
-          errorMessage = `Connection refused to SearXNG at ${SEARXNG_URL} - check if the instance is running and accessible`;
-        } else if (lastError.code === 'ETIMEDOUT') {
-          errorMessage = `Connection timeout to SearXNG at ${SEARXNG_URL} - the instance may be slow or unreachable`;
-        } else if (lastError.code === 'ENOTFOUND') {
-          errorMessage = `SearXNG instance not found at ${SEARXNG_URL} - check the URL configuration`;
-        } else if (lastError.response?.status === 404) {
-          errorMessage = `SearXNG search endpoint not found at ${SEARXNG_URL}/search - verify instance configuration`;
-        } else if (lastError.response?.status === 503) {
-          errorMessage = `SearXNG service unavailable (503) - the instance may be overloaded or down`;
-        } else if (lastError.response?.status) {
-          errorMessage = `SearXNG request error (${SEARXNG_URL}): HTTP ${lastError.response.status} - ${lastError.response.statusText}`;
-        } else {
-          errorMessage = `SearXNG request error (${SEARXNG_URL}): ${lastError.message}`;
-        }
-      } else if (lastError instanceof Error) {
-        errorMessage = `Unexpected error while contacting ${SEARXNG_URL}: ${lastError.message}`;
-      }
-
-      return { content: [{ type: 'text', text: errorMessage }], isError: true as const };
+      return this.performSearch(request.params.arguments);
     });
   }
 
+  private async performSearch(args: SearchArgs): Promise<McpToolResult> {
+    const searchParams = this.buildSearchParams(args);
+    const cacheKey = `search:${JSON.stringify(searchParams)}`;
+    const cachedResult = this.getCachedResult(cacheKey, args.max_results);
 
+    if (cachedResult) {
+      return { content: [{ type: 'text', text: JSON.stringify(cachedResult, null, 2) }] };
+    }
 
-  async run() {
-    let transport = 'stdio';
-    const args = process.argv.slice(2);
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] === '--transport') {
-        transport = args[i + 1] || transport;
-        break;
-      } else if (args[i].startsWith('--transport=')) {
-        transport = args[i].split('=')[1] || transport;
-        break;
+    try {
+      const results = await this.performSearchWithRetry(searchParams);
+      this.cache.set(cacheKey, { timestamp: Date.now(), data: results });
+      const limitedResults = this.applyMaxResults(results, args.max_results);
+      return { content: [{ type: 'text', text: JSON.stringify(limitedResults, null, 2) }] };
+    } catch (error) {
+      const message = this.createSearchFailureMessage(error);
+      console.error(`[SearxNG Bridge] ${message}`);
+      return { content: [{ type: 'text', text: message }], isError: true };
+    }
+  }
+
+  private buildSearchParams(args: SearchArgs): Record<string, unknown> {
+    const searchParams: Record<string, unknown> = {
+      q: args.query,
+      format: args.format || 'json'
+    };
+
+    if (args.language) searchParams.language = args.language;
+    if (args.categories) searchParams.categories = args.categories.join(',');
+    if (args.time_range) searchParams.time_range = args.time_range;
+    if (args.safesearch !== undefined) searchParams.safesearch = args.safesearch;
+    return searchParams;
+  }
+
+  private getCachedResult(cacheKey: string, maxResults?: number): SearxngResponse | undefined {
+    const entry = this.cache.get(cacheKey);
+    if (!entry || Date.now() - entry.timestamp >= this.CACHE_TTL) return undefined;
+    return this.applyMaxResults(entry.data, maxResults);
+  }
+
+  private applyMaxResults(result: SearxngResponse, maxResults?: number): SearxngResponse {
+    if (!maxResults || !Array.isArray(result.results)) return result;
+    return { ...result, results: result.results.slice(0, maxResults) };
+  }
+
+  private async performSearchWithRetry(searchParams: Record<string, unknown>): Promise<SearxngResponse> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
+      try {
+        const response = await this.axiosInstance.get<SearxngResponse>('/search', {
+          params: searchParams
+        });
+        return response.data;
+      } catch (error) {
+        lastError = error;
+        if (attempt < this.MAX_RETRIES) {
+          await this.sleep(this.RETRY_DELAY * attempt);
+        }
       }
     }
-    if (transport === 'stdio' && process.env.TRANSPORT) transport = process.env.TRANSPORT;
 
-       if (transport === 'http') {
-       const app = express();
-       const PORT = parseInt(process.env.PORT || '3002', 10);
-       const HOST = process.env.HOST || '127.0.0.1';
-       app.use(express.json());
-      
-      // Add a logging middleware to inspect headers
-      app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-        redactLog(`[SearxNG Bridge] Incoming request: ${req.method} ${req.path}`);
-        redactLog(`[SearxNG Bridge] Headers: ${JSON.stringify(req.headers, null, 2)}`);
-        next();
-      });
+    throw lastError ?? new Error('SearXNG search failed');
+  }
 
-      // Optional Bearer Auth middleware
-      const bearerAuthMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-        const requiredPaths = ['/mcp', '/healthz'];
-        const isProtectedPath = requiredPaths.some(path => req.path === path || req.path.startsWith(path));
-        
-        // Only apply to POST, GET, DELETE requests on protected paths
-        if (isProtectedPath && ['POST', 'GET', 'DELETE'].includes(req.method)) {
-          const bearerToken = process.env.MCP_HTTP_BEARER;
-          
-          // If bearer auth is enabled, check for valid Authorization header
-          if (bearerToken) {
-            const authHeader = req.headers.authorization;
-            if (!authHeader || !authHeader.startsWith('Bearer ')) {
-              redactLog('[SearxNG Bridge] Unauthorized access attempt - missing or invalid Authorization header');
-              return res.status(401).json({ error: 'Unauthorized: Missing or invalid Authorization header' });
-            }
-            
-            const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-            if (token !== bearerToken) {
-              redactLog('[SearxNG Bridge] Unauthorized access attempt - invalid token');
-              return res.status(401).json({ error: 'Unauthorized: Invalid token' });
-            }
-          }
-        }
-        next();
-      };
-      
-      // Apply the bearer auth middleware
-      app.use(bearerAuthMiddleware);
-      
-        // Secure CORS configuration with whitelist approach
-        const corsOrigin = process.env.CORS_ORIGIN 
-          ? (process.env.CORS_ORIGIN.includes(',') 
-              ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()) 
-              : process.env.CORS_ORIGIN)
-          : process.env.NODE_ENV === 'production' 
-            ? '*' // Production wildcard
-            : ['http://localhost:3002', 'http://127.0.0.1:3002']; // Development whitelist - only port 3002
-        
-        // CORS validation function
-        const validateOrigin = (origin: string | undefined, allowedOrigins: string | string[]): boolean => {
-          if (!origin) return true; // Allow requests with no origin (curl, mobile apps)
-          if (allowedOrigins === '*') return true; // Wildcard allows all origins
-          if (Array.isArray(allowedOrigins)) {
-            return allowedOrigins.some(allowed => allowed === origin);
-          }
-          return allowedOrigins === origin;
-        };
-        
-        app.use(cors({
-         origin: (origin, callback) => {
-           // For credentialed requests, we cannot use wildcard
-           // Must reflect the actual origin or return specific allowed origins
-           if (!origin) {
-             // No origin header (curl, mobile apps) - allow but don't use credentials
-             return callback(null, false);
-           }
-           
-           if (validateOrigin(origin, corsOrigin)) {
-             // Return the specific origin for credentialed requests
-             callback(null, origin);
-           } else {
-             redactLog(`[SearxNG Bridge] CORS blocked origin: ${origin}`);
-             callback(new Error('Not allowed by CORS'));
-           }
-         },
-         credentials: corsOrigin !== '*', // Only enable credentials for non-wildcard
-         exposedHeaders: ['mcp-session-id', 'mcp-protocol-version'],
-         allowedHeaders: ['Content-Type', 'Authorization', 'mcp-session-id'],
-         methods: ['GET', 'POST', 'DELETE', 'OPTIONS']
-       }));
+  private async sleep(delayMs: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
 
-      const transports: { [sessionId: string]: StreamableHTTPServerTransport } = {};
+  private createSearchFailureMessage(error: unknown): string {
+    const retryMessage = `Failed to fetch search results from SearxNG instance at ${SEARXNG_URL} after ${this.MAX_RETRIES} attempts.`;
 
-      // Rate limiting for POST /mcp - 100 requests per 60 seconds per IP
-      const mcpRateLimit = rateLimit({
-        windowMs: 60 * 1000, // 60 seconds
-        limit: 100, // 100 requests per windowMs
-        standardHeaders: 'draft-7', // draft-6: RateLimit-* headers; draft-7: combined RateLimit and Limit headers
-        legacyHeaders: false, // Disable X-RateLimit-* headers
-        message: {
-          error: 'Too Many Requests',
-          message: 'Rate limit exceeded. Please try again later.'
-        },
-        skipSuccessfulRequests: false, // Count all requests, including successful ones
-      });
-
-      app.post('/mcp', mcpRateLimit, async (req: express.Request, res: express.Response) => {
-        redactLog(`[SearxNG Bridge] POST /mcp received: ${JSON.stringify(req.body)}`);
-        const sessionId = req.headers['mcp-session-id'] as string | undefined;
-        let transport: StreamableHTTPServerTransport;
-
-        if (sessionId && transports[sessionId]) {
-          transport = transports[sessionId];
-        } else if (!sessionId && req.body && typeof req.body === 'object' && req.body.method === 'initialize') {
-            transport = new StreamableHTTPServerTransport({
-              sessionIdGenerator: () => randomUUID(),
-              onsessioninitialized: (sid) => {
-                transports[sid] = transport;
-              },
-              enableDnsRebindingProtection: true, // Enable for security
-              allowedHosts: [`${HOST}:${PORT}`, `localhost:${PORT}`, '127.0.0.1:' + PORT]
-            });
-          transport.onclose = () => {
-            if (transport.sessionId) delete transports[transport.sessionId];
-          };
-          await this.server.connect(transport);
-        } else {
-          res
-            .status(400)
-            .json({ jsonrpc: '2.0', error: { code: -32000, message: 'Bad Request: No valid session ID provided' }, id: null });
-          return;
-        }
-
-        await transport.handleRequest(req, res, req.body);
-      });
-
-      const handleSessionRequest = async (req: express.Request, res: express.Response) => {
-        const sessionId = req.headers['mcp-session-id'] as string | undefined;
-        if (!sessionId || !transports[sessionId]) {
-          res.status(400).send('Invalid or missing session ID');
-          return;
-        }
-        const transport = transports[sessionId];
-        await transport.handleRequest(req, res);
-      };
-
-      // OPTIONS endpoint for CORS preflight requests with security
-      app.options('/mcp', (req: express.Request, res: express.Response) => {
-        const origin = req.headers.origin;
-        
-        // Validate origin for preflight requests
-        if (!origin) {
-          // No origin header - allow without credentials
-          res.header('Access-Control-Allow-Origin', '*');
-          res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-          res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-session-id');
-          res.header('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
-          res.status(200).send();
-          return;
-        }
-        
-        if (validateOrigin(origin, corsOrigin)) {
-          // For credentialed requests, must reflect specific origin
-          res.header('Access-Control-Allow-Origin', origin);
-          res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-          res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-session-id');
-          res.header('Access-Control-Allow-Credentials', 'true');
-          res.header('Access-Control-Expose-Headers', 'mcp-session-id, mcp-protocol-version');
-          res.status(200).send();
-        } else {
-          redactLog(`[SearxNG Bridge] CORS preflight blocked origin: ${origin}`);
-          res.status(403).json({ error: 'Origin not allowed' });
-        }
-      });
-
-      app.get('/mcp', handleSessionRequest);
-      app.get('/healthz', (req: express.Request, res: express.Response) => {
-        res.status(200).json({ status: 'ok', version: PACKAGE_VERSION });
-      });
-       app.delete('/mcp', handleSessionRequest);
- 
-       const server = app.listen(PORT, HOST, () => {
-        console.error(`SearxNG Bridge MCP server v${PACKAGE_VERSION} running on http://${HOST}:${PORT}`);
-        if (DEBUG_MODE) console.error('[SearxNG Bridge] Debug mode enabled');
-        // Log if bearer auth is enabled
-        if (process.env.MCP_HTTP_BEARER) {
-          console.error('[SearxNG Bridge] Bearer authentication enabled');
-        }
-      });
-
-      // Graceful shutdown
-      const shutdown = async () => {
-        console.error('[SearxNG Bridge] Shutting down...');
-        // Close all transports
-        for (const [sessionId, transport] of Object.entries(transports)) {
-          try {
-            await transport.close();
-          } catch (error) {
-            console.error(`[SearxNG Bridge] Error closing transport ${sessionId}:`, error);
-          }
-        }
-        // Close the main server
-        await this.server.close();
-        // Close HTTP server
-        server.close(() => {
-          console.error('[SearxNG Bridge] HTTP server closed');
-        });
-        process.exit(0);
-      };
-
-      process.on('SIGINT', shutdown);
-      process.on('SIGTERM', shutdown);
-    } else {
-      const stdioTransport = new StdioServerTransport();
-      await this.server.connect(stdioTransport);
-      console.error(`SearxNG Bridge MCP server v${PACKAGE_VERSION} running on stdio`);
-      if (DEBUG_MODE) console.error('[SearxNG Bridge] Debug mode enabled');
+    if (!axios.isAxiosError(error)) {
+      if (error instanceof Error) {
+        return `Unexpected error while contacting ${SEARXNG_URL}: ${error.message}`;
+      }
+      return retryMessage;
     }
+
+    const codeMessages = new Map<string, string>([
+      ['ECONNREFUSED', `Connection refused to SearXNG at ${SEARXNG_URL} - check if the instance is running and accessible`],
+      ['ETIMEDOUT', `Connection timeout to SearXNG at ${SEARXNG_URL} - the instance may be slow or unreachable`],
+      ['ENOTFOUND', `SearXNG instance not found at ${SEARXNG_URL} - check the URL configuration`]
+    ]);
+
+    if (error.code && codeMessages.has(error.code)) {
+      return codeMessages.get(error.code)!;
+    }
+
+    const status = error.response?.status;
+    if (status === 404) {
+      return `SearXNG search endpoint not found at ${SEARXNG_URL}/search - verify instance configuration`;
+    }
+    if (status === 503) {
+      return `SearXNG service unavailable (503) - the instance may be overloaded or down`;
+    }
+    if (status) {
+      return `SearXNG request error (${SEARXNG_URL}): HTTP ${status} - ${error.response?.statusText}`;
+    }
+    return `SearXNG request error (${SEARXNG_URL}): ${error.message}`;
+  }
+
+  private getTransportMode(): string {
+    const args = process.argv.slice(2);
+    const inlineTransport = args.find((argument) => argument.startsWith('--transport='));
+
+    if (inlineTransport) {
+      return inlineTransport.split('=')[1] || 'stdio';
+    }
+
+    const transportFlagIndex = args.indexOf('--transport');
+    if (transportFlagIndex !== -1 && transportFlagIndex + 1 < args.length) {
+      return args[transportFlagIndex + 1];
+    }
+
+    if (process.env.TRANSPORT) {
+      return process.env.TRANSPORT;
+    }
+
+    return 'stdio';
+  }
+
+  async run(): Promise<void> {
+    this.setupProcessHandlers();
+    await this.validateSearxngConnection();
+    const transport = this.getTransportMode();
+
+    if (transport === 'http') {
+      this.startHttpServer();
+      return;
+    }
+
+    await this.runStdioServer();
+  }
+
+  private async runStdioServer(): Promise<void> {
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+    console.error(`SearxNG Bridge MCP server v${PACKAGE_VERSION} running on stdio`);
+
+    if (DEBUG_MODE) {
+      console.error('[SearxNG Bridge] Debug mode enabled');
+    }
+
+    process.once('SIGINT', async () => {
+      await this.server.close();
+      process.exit(0);
+    });
+  }
+
+  private startHttpServer(): void {
+    const app: Express = express();
+    const transports = new Map<string, StreamableHTTPServerTransport>();
+    const port = Number.parseInt(process.env.PORT || '3002', 10);
+    const host = process.env.HOST || '127.0.0.1';
+    const corsOrigin = this.getCorsOrigin();
+
+    app.disable('x-powered-by');
+    app.set('json escape', true);
+    app.use(express.json());
+    app.use(this.createHttpLoggingMiddleware());
+    app.use(this.createBearerAuthMiddleware());
+    app.use(cors(this.createCorsOptions(corsOrigin)));
+
+    app.post('/mcp', this.createMcpRateLimiter(), this.createMcpPostHandler(transports, host, port));
+    app.get('/mcp', this.createSessionRequestHandler(transports));
+    app.delete('/mcp', this.createSessionRequestHandler(transports));
+    app.get('/healthz', (_req: Request, res: Response) => {
+      res.status(200).json({ status: 'ok', version: PACKAGE_VERSION });
+    });
+
+    const httpServer = app.listen(port, host, () => {
+      console.error(`SearxNG Bridge MCP server v${PACKAGE_VERSION} running on http://${host}:${port}`);
+      if (DEBUG_MODE) console.error('[SearxNG Bridge] Debug mode enabled');
+      if (process.env.MCP_HTTP_BEARER) console.error('[SearxNG Bridge] Bearer authentication enabled');
+    });
+
+    this.registerHttpShutdown(httpServer, transports);
+  }
+
+  private createHttpLoggingMiddleware() {
+    return (req: Request, res: Response, next: NextFunction) => {
+      redactLog(`[SearxNG Bridge] Incoming request: ${req.method} ${req.path}`);
+      redactLog(`[SearxNG Bridge] Headers: ${JSON.stringify(req.headers, null, 2)}`);
+      next();
+    };
+  }
+
+  private createBearerAuthMiddleware() {
+    return (req: Request, res: Response, next: NextFunction) => {
+      const isProtectedPath = req.path.startsWith('/mcp') || req.path.startsWith('/healthz');
+      const isProtectedMethod = ['POST', 'GET', 'DELETE'].includes(req.method);
+
+      if (!isProtectedPath || !isProtectedMethod || !process.env.MCP_HTTP_BEARER) {
+        next();
+        return;
+      }
+
+      const authorization = req.headers.authorization;
+      const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : undefined;
+
+      if (!token || token !== process.env.MCP_HTTP_BEARER) {
+        redactLog('[SearxNG Bridge] Unauthorized access attempt - missing or invalid Authorization header');
+        res.status(401).json({ error: 'Unauthorized: Missing or invalid Authorization header' });
+        return;
+      }
+
+      next();
+    };
+  }
+
+  private getCorsOrigin(): string | string[] {
+    const configuredOrigin = process.env.CORS_ORIGIN;
+
+    if (configuredOrigin) {
+      const origins = configuredOrigin.split(',').map((origin) => origin.trim()).filter(Boolean);
+      return origins.length === 1 ? origins[0] : origins;
+    }
+
+    if (process.env.NODE_ENV === 'production') {
+      return '*';
+    }
+
+    return ['http://localhost:3002', 'http://127.0.0.1:3002'];
+  }
+
+  private isOriginAllowed(origin: string, allowedOrigins: string | string[]): boolean {
+    if (allowedOrigins === '*') return true;
+    if (Array.isArray(allowedOrigins)) return allowedOrigins.includes(origin);
+    return allowedOrigins === origin;
+  }
+
+  private createCorsOptions(corsOrigin: string | string[]) {
+    return {
+      origin: (origin: string | undefined, callback: (error: Error | null, origin?: false | string) => void) => {
+        if (!origin) {
+          callback(null, false);
+          return;
+        }
+
+        if (!this.isOriginAllowed(origin, corsOrigin)) {
+          redactLog(`[SearxNG Bridge] CORS blocked origin: ${origin}`);
+          callback(new Error('Not allowed by CORS'));
+          return;
+        }
+
+        callback(null, origin);
+      },
+      credentials: corsOrigin !== '*',
+      exposedHeaders: ['mcp-session-id', 'mcp-protocol-version'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'mcp-session-id'],
+      methods: ['GET', 'POST', 'DELETE', 'OPTIONS']
+    };
+  }
+
+  private createMcpRateLimiter() {
+    return rateLimit({
+      windowMs: 60 * 1000, // 60 seconds
+      limit: 100, // 100 requests per windowMs
+      standardHeaders: 'draft-7',
+      legacyHeaders: false,
+      message: {
+        error: 'Too Many Requests',
+        message: 'Rate limit exceeded. Please try again later.'
+      },
+      skipSuccessfulRequests: false
+    });
+  }
+
+  private createMcpPostHandler(
+    transports: Map<string, StreamableHTTPServerTransport>,
+    host: string,
+    port: number
+  ) {
+    return async (req: Request, res: Response) => {
+      redactLog(`[SearxNG Bridge] POST /mcp received: ${JSON.stringify(req.body)}`);
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      const existingTransport = sessionId ? transports.get(sessionId) : undefined;
+
+      if (existingTransport) {
+        await existingTransport.handleRequest(req, res, req.body);
+        return;
+      }
+
+      if (!sessionId && isInitializeRequest(req.body)) {
+        await this.connectHttpTransport(transports, host, port, req, res);
+        return;
+      }
+
+      res.status(400).json({
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
+        id: null
+      });
+    };
+  }
+
+  private async connectHttpTransport(
+    transports: Map<string, StreamableHTTPServerTransport>,
+    host: string,
+    port: number,
+    req: Request,
+    res: Response
+  ): Promise<void> {
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (sessionId) => {
+        transports.set(sessionId, transport);
+      },
+      enableDnsRebindingProtection: true,
+      allowedHosts: [`${host}:${port}`, `localhost:${port}`, `127.0.0.1:${port}`]
+    });
+
+    transport.onclose = () => {
+      const sessionId = transport.sessionId;
+      if (!sessionId) return;
+      transports.delete(sessionId);
+    };
+
+    await this.server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  }
+
+  private createSessionRequestHandler(transports: Map<string, StreamableHTTPServerTransport>) {
+    return async (req: Request, res: Response) => {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      const transport = sessionId ? transports.get(sessionId) : undefined;
+
+      if (!sessionId || !transport) {
+        res.status(400).send('Invalid or missing session ID');
+        return;
+      }
+
+      await transport.handleRequest(req, res);
+    };
+  }
+
+  private registerHttpShutdown(
+    httpServer: ReturnType<Express['listen']>,
+    transports: Map<string, StreamableHTTPServerTransport>
+  ): void {
+    let shuttingDown = false;
+
+    const shutdown = async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.error('[SearxNG Bridge] Shutting down...');
+
+      for (const [sessionId, transport] of transports.entries()) {
+        try {
+          await transport.close();
+        } catch (error) {
+          console.error(`[SearxNG Bridge] Error closing transport ${sessionId}:`, error);
+        }
+      }
+
+      await this.server.close();
+      await new Promise<void>((resolve) => {
+        httpServer.close(() => resolve());
+      });
+      console.error('[SearxNG Bridge] HTTP server closed');
+      process.exit(0);
+    };
+
+    process.once('SIGINT', () => void shutdown());
+    process.once('SIGTERM', () => void shutdown());
   }
 }
 
-const server = new SearxngBridgeServer();
-server.run().catch(console.error);
+try {
+  const server = new SearxngBridgeServer();
+  await server.run();
+} catch (error) {
+  console.error('[SearxNG Bridge] Fatal error:', error);
+  process.exit(1);
+}

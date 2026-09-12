@@ -201,3 +201,23 @@ jobs:
             --target "${GITHUB_SHA}" \
             --title "${RELEASE_TAG}" \
             --generate-notes
+
+      - name: Mark release pull request as tagged
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          RELEASE_PR_NUMBER="$(gh api \
+            "/repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+            --jq '.[] | select(.merge_commit_sha == env.GITHUB_SHA) | .number' | head -n1)"
+
+          if [[ -z "${RELEASE_PR_NUMBER}" ]]; then
+            echo "No pull request is associated with ${GITHUB_SHA}; skipping release PR labels."
+            exit 0
+          fi
+
+          gh pr edit "${RELEASE_PR_NUMBER}" --add-label "autorelease: tagged"
+          gh pr edit "${RELEASE_PR_NUMBER}" --remove-label "autorelease: pending"
+          echo "Marked release PR #${RELEASE_PR_NUMBER} as tagged."

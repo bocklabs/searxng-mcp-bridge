@@ -250,6 +250,4 @@ Releases are automated via [release-please](https://github.com/googleapis/releas
 
 Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/bocklabs/searxng-mcp-bridge/issues).
 
-## License
 
-[MIT](LICENSE) -- Copyright (c) 2025 Nitish Raj

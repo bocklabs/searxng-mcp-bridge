@@ -1,8 +1,11 @@
 {
-  "name": "@nitish-raj/searxng-mcp-bridge",
-  "version": "0.11.51",
+  "name": "@bocklabs/searxng-mcp-bridge",
+  "version": "0.12.1",
   "description": "MCP Server for SearxNG Bridge",
   "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "mcp-searxng-bridge": "build/index.js"
@@ -23,7 +26,7 @@
     "release:major": "node scripts/release.js major",
     "release:minor": "node scripts/release.js minor",
     "release:patch": "node scripts/release.js patch",
-    "version": "conventional-changelog -p angular -i CHANGELOG.md -s && git add CHANGELOG.md"
+    "version": "conventional-changelog -p angular -i CHANGELOG.md && git add CHANGELOG.md"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
@@ -37,7 +40,8 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/node": "^24.0.0",
-    "conventional-changelog-cli": "^5.0.0",
+    "conventional-changelog": "^8.1.3",
+    "conventional-changelog-angular": "^8.3.1",
     "tsx": "^4.20.5",
     "typescript": "^7.0.0"
   },
@@ -52,12 +56,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nitish-raj/searxng-mcp-bridge.git"
+    "url": "git+https://github.com/bocklabs/searxng-mcp-bridge.git"
   },
   "bugs": {
-    "url": "https://github.com/nitish-raj/searxng-mcp-bridge/issues"
+    "url": "https://github.com/bocklabs/searxng-mcp-bridge/issues"
   },
-  "homepage": "https://github.com/nitish-raj/searxng-mcp-bridge#readme",
+  "homepage": "https://github.com/bocklabs/searxng-mcp-bridge#readme",
   "engines": {
     "node": ">=25.0.0 <26"
   }

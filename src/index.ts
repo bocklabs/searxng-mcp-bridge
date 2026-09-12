@@ -1,15 +1,8 @@
 #!/usr/bin/env node
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import {
-  CallToolRequestSchema,
-  CallToolResult,
-  ErrorCode,
-  isInitializeRequest,
-  ListToolsRequestSchema,
-  McpError,
-} from '@modelcontextprotocol/sdk/types.js';
+import { CallToolResult, isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import axios, { AxiosInstance } from 'axios';
 import express, { Express, NextFunction, Request, Response } from 'express';
 import cors from 'cors';
@@ -18,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as z from 'zod/v4';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,15 +19,17 @@ const packageJsonPath = path.resolve(__dirname, '../package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version: string };
 const PACKAGE_VERSION = packageJson.version;
 
-interface SearchArgs {
-  query: string;
-  language?: string;
-  categories?: string[];
-  time_range?: string;
-  safesearch?: number;
-  format?: string;
-  max_results?: number;
-}
+const SearchToolSchema = z.object({
+  query: z.string().describe('The search query string'),
+  language: z.string().optional().describe('Language code for search results (e.g., "en-US", "fr", "de")'),
+  categories: z.array(z.string()).optional().describe('Categories to search in (e.g., ["general", "images", "news"])'),
+  time_range: z.enum(['day', 'week', 'month', 'year']).optional().describe('Time range for results'),
+  safesearch: z.number().int().min(0).max(2).optional().describe('Safe search level (0: off, 1: moderate, 2: strict)'),
+  format: z.enum(['json', 'html']).optional().describe('Result format (default: "json")'),
+  max_results: z.number().int().positive().optional().describe('Maximum number of results to return')
+});
+
+type SearchArgs = z.infer<typeof SearchToolSchema>;
 
 interface SearxngResponse {
   results?: unknown[];
@@ -46,21 +42,6 @@ interface CacheEntry {
 }
 
 type McpToolResult = CallToolResult;
-
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null;
-};
-
-const isValidSearchArgs = (args: unknown): args is SearchArgs => {
-  if (!isRecord(args) || typeof args.query !== 'string') return false;
-  if (args.language !== undefined && typeof args.language !== 'string') return false;
-  if (args.categories !== undefined && !Array.isArray(args.categories)) return false;
-  if (args.time_range !== undefined && typeof args.time_range !== 'string') return false;
-  if (args.safesearch !== undefined && typeof args.safesearch !== 'number') return false;
-  if (args.format !== undefined && typeof args.format !== 'string') return false;
-  if (args.max_results !== undefined && typeof args.max_results !== 'number') return false;
-  return true;
-};
 
 const configuredSearxngUrl = process.env.SEARXNG_INSTANCE_URL;
 const DEBUG_MODE = process.env.SEARXNG_BRIDGE_DEBUG === 'true';
@@ -94,7 +75,7 @@ const SEARXNG_URL: string = configuredSearxngUrl;
 console.log(`[SearxNG Bridge] Using SearxNG instance URL: ${redactUrl(SEARXNG_URL)}`);
 
 class SearxngBridgeServer {
-  private readonly server: Server;
+  private readonly server: McpServer;
   private readonly axiosInstance: AxiosInstance;
   private readonly cache: Map<string, CacheEntry> = new Map();
   private readonly CACHE_TTL = 5 * 60 * 1000;
@@ -102,7 +83,7 @@ class SearxngBridgeServer {
   private readonly RETRY_DELAY = 1000;
 
   constructor() {
-    this.server = new Server(
+    this.server = new McpServer(
       {
         name: 'searxng-bridge',
         version: PACKAGE_VERSION,
@@ -124,7 +105,7 @@ class SearxngBridgeServer {
       }
     });
 
-    this.setupToolHandlers();
+    this.registerTools();
   }
 
   private async validateSearxngConnection(): Promise<void> {
@@ -228,80 +209,24 @@ class SearxngBridgeServer {
     interval.unref();
   }
 
-  private setupToolHandlers(): void {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: [
-        {
-          name: 'search',
-          description: 'Perform a search using the configured SearxNG instance',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              query: {
-                type: 'string',
-                description: 'The search query string',
-              },
-              language: {
-                type: 'string',
-                description: 'Language code for search results (e.g., "en-US", "fr", "de")',
-              },
-              categories: {
-                type: 'array',
-                items: {
-                  type: 'string',
-                },
-                description: 'Categories to search in (e.g., ["general", "images", "news"])',
-              },
-              time_range: {
-                type: 'string',
-                description: 'Time range for results (e.g., "day", "week", "month", "year")',
-              },
-              safesearch: {
-                type: 'number',
-                description: 'Safe search level (0: off, 1: moderate, 2: strict)',
-              },
-              format: {
-                type: 'string',
-                description: 'Result format (default: "json", options: "json", "html")',
-              },
-              max_results: {
-                type: 'number',
-                description: 'Maximum number of results to return',
-              },
-            },
-            required: ['query'],
-          },
-        },
-        {
-          name: 'health_check',
-          description: 'Check the health and connectivity status of the SearxNG bridge',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-            required: [],
-          },
-        },
-      ],
-    }));
+  private registerTools(): void {
+    this.server.registerTool(
+      'search',
+      {
+        description: 'Perform a search using the configured SearxNG instance',
+        inputSchema: SearchToolSchema
+      },
+      async (args) => this.performSearch(args)
+    );
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      if (request.params.name === 'health_check') {
-        return this.performHealthCheck();
-      }
-
-      if (request.params.name !== 'search') {
-        throw new McpError(
-          ErrorCode.MethodNotFound,
-          `Unknown tool: ${request.params.name}`
-        );
-      }
-
-      if (!isValidSearchArgs(request.params.arguments)) {
-        throw new McpError(ErrorCode.InvalidParams, 'Invalid search arguments. Requires a "query" string.');
-      }
-
-      return this.performSearch(request.params.arguments);
-    });
+    this.server.registerTool(
+      'health_check',
+      {
+        description: 'Check the health and connectivity status of the SearxNG bridge',
+        inputSchema: z.object({})
+      },
+      async () => this.performHealthCheck()
+    );
   }
 
   private async performSearch(args: SearchArgs): Promise<McpToolResult> {

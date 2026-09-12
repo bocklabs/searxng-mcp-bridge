@@ -249,5 +249,3 @@ Releases are automated via [release-please](https://github.com/googleapis/releas
 5. Open a pull request using the [PR template](.github/PULL_REQUEST_TEMPLATE.md)
 
 Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/bocklabs/searxng-mcp-bridge/issues).
-
-

@@ -7,6 +7,13 @@
 * update version script and dependencies for changelog generation ([ef44594](https://github.com/bocklabs/searxng-mcp-bridge/commit/ef44594eaef4f871ce871598b1adde2882130f0d))
 * update version script and dependencies for changelog generation ([efd226b](https://github.com/bocklabs/searxng-mcp-bridge/commit/efd226b4c60888ba721be4c6606e1dd9c3c1d59d))
 
+## [0.12.8](https://github.com/bocklabs/searxng-mcp-bridge/compare/v0.12.7...v0.12.8) (2026-09-22)
+
+
+### Bug Fixes
+
+* **deps:** lock file maintenance ([#28](https://github.com/bocklabs/searxng-mcp-bridge/issues/28)) ([efd4b6b](https://github.com/bocklabs/searxng-mcp-bridge/commit/efd4b6b08ac0069913588a7eb26272e0b908af04))
+
 ## [0.12.7](https://github.com/bocklabs/searxng-mcp-bridge/compare/v0.12.6...v0.12.7) (2026-09-21)
 
 

@@ -7,6 +7,13 @@
 * update version script and dependencies for changelog generation ([ef44594](https://github.com/bocklabs/searxng-mcp-bridge/commit/ef44594eaef4f871ce871598b1adde2882130f0d))
 * update version script and dependencies for changelog generation ([efd226b](https://github.com/bocklabs/searxng-mcp-bridge/commit/efd226b4c60888ba721be4c6606e1dd9c3c1d59d))
 
+## [0.12.17](https://github.com/bocklabs/searxng-mcp-bridge/compare/v0.12.16...v0.12.17) (2026-10-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @modelcontextprotocol/sdk to v1.32.2 ([#46](https://github.com/bocklabs/searxng-mcp-bridge/issues/46)) ([08d571b](https://github.com/bocklabs/searxng-mcp-bridge/commit/08d571bb7d8a816ba88953b3329e91e412fd6834))
+
 ## [0.12.16](https://github.com/bocklabs/searxng-mcp-bridge/compare/v0.12.15...v0.12.16) (2026-10-20)
 
 

@@ -435,7 +435,8 @@ describe('HTTP server', () => {
     const exitSpy = vi.spyOn(process, 'exit').mockReturnValue(undefined as never);
     const logSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    const transportClose = vi.fn().mockResolvedValue(undefined);
+    let finishClose!: () => void;
+    const transportClose = vi.fn(() => new Promise<void>((resolve) => { finishClose = resolve; }));
     const transportFail = vi.fn().mockRejectedValue(new Error('close failed'));
     const transports = new Map([
       ['one', { close: transportClose }],
@@ -451,9 +452,11 @@ describe('HTTP server', () => {
     server.registerHttpShutdown({ close: httpClose }, transports);
     listeners.SIGTERM();
 
-    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(0));
     expect(transportClose).toHaveBeenCalledTimes(1);
     expect(transportFail).toHaveBeenCalledTimes(1);
+    expect(mcpClose).not.toHaveBeenCalled();
+    finishClose();
+    await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(0));
     expect(mcpClose).toHaveBeenCalledTimes(1);
     expect(httpClose).toHaveBeenCalledWith(expect.any(Function));
     expect(logSpy.mock.calls.some(([message]) => String(message).includes('Error closing transport two'))).toBe(true);

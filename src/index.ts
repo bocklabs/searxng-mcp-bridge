@@ -592,13 +592,13 @@ export class SearxngBridgeServer {
       shuttingDown = true;
       console.error('[SearxNG Bridge] Shutting down...');
 
-      for (const [sessionId, transport] of transports.entries()) {
+      await Promise.all(Array.from(transports, async ([sessionId, transport]) => {
         try {
           await transport.close();
         } catch (error) {
           console.error(`[SearxNG Bridge] Error closing transport ${sessionId}:`, error);
         }
-      }
+      }));
 
       await this.server.close();
       await new Promise<void>((resolve) => {

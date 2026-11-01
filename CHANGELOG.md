@@ -7,6 +7,13 @@
 * update version script and dependencies for changelog generation ([ef44594](https://github.com/bocklabs/searxng-mcp-bridge/commit/ef44594eaef4f871ce871598b1adde2882130f0d))
 * update version script and dependencies for changelog generation ([efd226b](https://github.com/bocklabs/searxng-mcp-bridge/commit/efd226b4c60888ba721be4c6606e1dd9c3c1d59d))
 
+## [0.12.19](https://github.com/bocklabs/searxng-mcp-bridge/compare/v0.12.18...v0.12.19) (2026-11-01)
+
+
+### Bug Fixes
+
+* improve transport closure handling in shutdown process ([#51](https://github.com/bocklabs/searxng-mcp-bridge/issues/51)) ([2f5b618](https://github.com/bocklabs/searxng-mcp-bridge/commit/2f5b618d94e2c0c29f083b32925470f1d2fd1844))
+
 ## [0.12.18](https://github.com/bocklabs/searxng-mcp-bridge/compare/v0.12.17...v0.12.18) (2026-10-27)
 
 

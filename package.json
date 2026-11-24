@@ -1,6 +1,6 @@
 {
   "name": "@bocklabs/searxng-mcp-bridge",
-  "version": "0.12.25",
+  "version": "0.12.26",
   "description": "MCP Server for SearxNG Bridge",
   "private": false,
   "publishConfig": {
